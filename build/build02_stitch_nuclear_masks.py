@@ -1,6 +1,6 @@
 import os
 import zarr
-from utilities.functions import path_leaf
+from src.utilities.functions import path_leaf
 import numpy as np
 from omnipose.core import compute_masks
 from cellpose.core import use_gpu
@@ -8,6 +8,7 @@ from skimage.segmentation import watershed
 from scipy.ndimage import zoom
 from tqdm import tqdm
 from skimage import morphology
+from skimage.morphology import label
 import pandas as pd
 import glob2 as glob
 

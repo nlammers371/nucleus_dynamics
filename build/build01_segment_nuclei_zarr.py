@@ -15,9 +15,9 @@ from cellpose import models
 from cellpose.core import use_gpu
 import pandas as pd
 from skimage.transform import resize
-from utilities.functions import path_leaf
+from src.utilities.functions import path_leaf
 import zarr
-from utilities.image_utils import calculate_LoG
+from src.utilities.image_utils import calculate_LoG
 
 # logging = logging.getlogging(__name__)
 logging.basicConfig(level=logging.NOTSET)

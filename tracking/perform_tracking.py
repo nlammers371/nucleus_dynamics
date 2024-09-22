@@ -2,13 +2,14 @@ import napari
 import os
 import numpy as np
 from tqdm import tqdm
+import scipy.ndimage as ndi
 from skimage.transform import resize
 from ultrack.imgproc.intensity import robust_invert
 from ultrack.imgproc.segmentation import detect_foreground
 import time
 from ultrack.utils.array import array_apply
 from ultrack import MainConfig, load_config, track, to_tracks_layer, tracks_to_zarr
-import nd2
+from src.utilities.register_image_stacks import registration_wrapper
 import zarr
 from ultrack.utils import estimate_parameters_from_labels, labels_to_edges
 import glob2 as glob
@@ -17,8 +18,8 @@ from skimage.segmentation import watershed
 # get path to raw nd2 file
 
 
-def perform_tracking(root, experiment_date, well_num, tracking_config, scale_vec, seg_model, start_i=0, stop_i=None,
-                     overwrite_flag=False, use_centroids=False, add_label_spacers=False):
+def perform_tracking(root, experiment_date, well_num, tracking_config, seg_model, start_i=0, stop_i=None,
+                     overwrite_tracking=False, overwrite_registration=False, use_stack_flag=False, suffix = ""):
 
     # imObject = nd2.ND2File(nd2_path)
     # res_raw = imObject.voxel_size()
@@ -31,65 +32,88 @@ def perform_tracking(root, experiment_date, well_num, tracking_config, scale_vec
 
     # set parameters
     # data_zarr = os.path.join(root, "built_data", "zarr_image_files", experiment_date, file_prefix + ".zarr")
-    if not use_centroids:
-        mask_zarr_path = os.path.join(root, "built_data", "stitched_labels", seg_model, experiment_date, file_prefix + "_labels_stitched.zarr")
-        suffix = ""
+    if use_stack_flag:
+        mask_zarr_path = os.path.join(root, "built_data", "mask_stacks", seg_model, experiment_date, file_prefix + "_mask_stacks.zarr")
+        mask_zarr_path_r = os.path.join(root, "built_data", "mask_stacks", seg_model, experiment_date, file_prefix + "_mask_stacks_registered.zarr")
     else:
-        mask_zarr_path = os.path.join(root, "built_data", "centroid_labels", seg_model, experiment_date,
-                                      file_prefix + "_centroids.zarr")
-        suffix = "_centroid"
+        mask_zarr_path = os.path.join(root, "built_data", "mask_stacks", seg_model, experiment_date,
+                                      file_prefix + "_mask_aff.zarr")
+        mask_zarr_path_r = os.path.join(root, "built_data", "mask_stacks", seg_model, experiment_date,
+                                        file_prefix + "_mask_aff_registered.zarr")
 
-    if add_label_spacers:
-        suffix += "_spacer"
 
-    # data_tzyx_full = zarr.open(data_zarr, mode='r')
-    mask_tzyx_full = zarr.open(mask_zarr_path, mode='r')
-    if stop_i is None:
-        stop_i = mask_tzyx_full.shape[0]
-
+    # set output path for tracking results
+    project_path = os.path.join(root, "tracking", experiment_date, tracking_name, f"well{well_num:04}" + suffix, "")
+    if not os.path.isdir(project_path):
+        os.makedirs(project_path)
     # get path to metadata
     metadata_path = os.path.join(root, "metadata", "tracking")
 
-    # set output path for tracking results
-    project_path = os.path.join(root, "tracking", experiment_date,  tracking_name, f"well{well_num:04}" + suffix, "")
-    if not os.path.isdir(project_path):
-        os.makedirs(project_path)
+    # perform registration if necessary
+    if not os.path.exists(mask_zarr_path_r) or overwrite_registration:
 
-    # specify time points to load
-    # data_tzyx = data_tzyx_full[start_i:stop_i, :, :, :]
-    if well_num == 12:
-        mask_tzyx = mask_tzyx_full[start_i:stop_i, :, 400:850, 80:520]
-    elif well_num == 2:
-        mask_tzyx = mask_tzyx_full[start_i:stop_i, :, 300:700, 100:500]
+        # data_tzyx_full = zarr.open(data_zarr, mode='r')
+        mask_tzyx_full = zarr.open(mask_zarr_path, mode='r')
+        if stop_i is None:
+            stop_i = mask_tzyx_full.shape[0]
+
+        # register timerseries data. Load previous registration if it exists
+        shift_array = registration_wrapper(root, experiment_date, well_index=well_num, model_name=seg_model, overwrite_flag=True)
+
+        # initialize empty array
+        store = zarr.DirectoryStore(mask_zarr_path_r)
+        if use_stack_flag:
+            mask_tzyx_r = zarr.open(store, mode='a', shape=mask_tzyx_full.shape, dtype=np.uint16, chunks=(1, 1,) + mask_tzyx_full.shape[2:])
+            # shift masks to match registrationllyx_fu
+            for i in tqdm(range(mask_tzyx_r.shape[1]), "Aligning masks..."):
+                mask_tzyx_r[0, i] = mask_tzyx_full[0, i]
+                for t in range(mask_tzyx_full.shape[0] - 1):
+                    mask_tzyx_r[t + 1, i]= ndi.shift(mask_tzyx_full[t + 1, i], (shift_array[t + 1, :]), order=0)
+        else:
+            mask_tzyx_r = zarr.open(store, mode='a', shape=mask_tzyx_full.shape, dtype=np.uint16,
+                                    chunks=(1,) + mask_tzyx_full.shape[1:])
+            # shift masks to match registrationllyx_fu
+            mask_tzyx_r[0] = mask_tzyx_full[0]
+            for t in tqdm(range(mask_tzyx_r.shape[0] - 1), "Aligning masks..."):
+                mask_tzyx_r[t + 1] = ndi.shift(mask_tzyx_full[t + 1], (shift_array[t + 1, :]), order=0)
+
+
+        print("saving registered masks.")
+        # initialize zarr file to save mask hierarchy
+        meta_keys = mask_tzyx_full.attrs.keys()
+        for meta_key in meta_keys:
+            mask_tzyx_r.attrs[meta_key] = mask_tzyx_full.attrs[meta_key]
+
     else:
-        mask_tzyx = mask_tzyx_full
+        store = zarr.DirectoryStore(mask_zarr_path_r)
+        mask_tzyx_r = zarr.open(store, mode='r')
+        if stop_i is None:
+            stop_i = mask_tzyx_r.shape[0]
+
+    # convert masks to list of arrays
+    if use_stack_flag:
+        mask_list = [mask_tzyx_r[start_i:stop_i, i, :, :, :] for i in range(mask_tzyx_r.shape[1])]
+        out_shape = mask_list[0].shape
+    else:
+        mask_list = mask_tzyx_r[start_i:stop_i]
+        out_shape = mask_list.shape
+
+    scale_vec = mask_tzyx_r.attrs["voxel_size_um"]
 
     # load tracking config file
     cfg = load_config(os.path.join(metadata_path, tracking_config))
     cfg.data_config.working_dir = project_path
-    if use_centroids:
-        cfg.segmentation_config.min_area = 90
-        cfg.segmentation_config.max_area = 200
 
     # get tracking inputs
-    detection, boundaries = labels_to_edges(mask_tzyx)
+    dstore = zarr.DirectoryStore(project_path + "detection.zarr")
+    bstore = zarr.DirectoryStore(project_path + "boundaries.zarr")
+    detection = zarr.open(store=dstore, mode='a', shape=out_shape, dtype=bool, chunks=(1,) + out_shape[1:])
+    boundaries = zarr.open(store=bstore, mode='a', shape=out_shape, dtype=np.uint16, chunks=(1,) + out_shape[1:])
 
-    if add_label_spacers: # seperate labeld components
-        mask_tzyx_eroded = mask_tzyx.copy()
-        for t in range(mask_tzyx_eroded.shape[0]):
-            mask_temp = mask_tzyx_eroded[t]
-            mask_temp[boundaries[t] > 0] = 0
-            mask_tzyx_eroded[t] = mask_temp
-
-        # cellpose_directory = os.path.join(root, "built_data", "cellpose_output", seg_model, experiment_date, '')
-        # prob_name = os.path.join(cellpose_directory, file_prefix + "_probs.zarr")
-        #
-        # # mask_zarr = zarr.open(mask_name, mode="r")
-        # prob_zarr = zarr.open(prob_name, mode="r")[start_i:stop_i, :, 400:850, 80:520]
-        #
-        # wt_array = watershed(image=-prob_zarr[0], markers=mask_tzyx_eroded, mask=mask_tzyx[0]>0, watershed_line=False)
-        detection, boundaries = labels_to_edges(mask_tzyx_eroded)
-
+    d, b = labels_to_edges(mask_list)
+    for t in range(d.shape[0]):
+        detection[t] = d[t]
+        boundaries[t] = b[t]
     # Perform tracking
     print("Performing tracking...")
     track(
@@ -97,7 +121,7 @@ def perform_tracking(root, experiment_date, well_num, tracking_config, scale_vec
         detection=detection,
         edges=boundaries,
         scale=scale_vec,
-        overwrite=True,
+        overwrite=overwrite_tracking,
     )
 
     print("Saving results...")
@@ -117,17 +141,12 @@ def perform_tracking(root, experiment_date, well_num, tracking_config, scale_vec
 
 if __name__ == '__main__':
 
-    scale_vec = np.asarray([2.0, 0.55, 0.55])
-    experiment_date = "20240223"
-    root = "/media/nick/hdd02/Cole Trapnell's Lab Dropbox/Nick Lammers/Nick/pecfin_dynamics/fin_morphodynamics/"
-    overwrite_flag = True
-    well_num = 2
+    experiment_date = "20240620"
+    root = "/media/nick/hdd02/Cole Trapnell's Lab Dropbox/Nick Lammers/Nick/pecfin_dynamics/"
+    well_num = 3
     use_centroids = False
     tracking_config = "tracking_jordao_frontier.txt"
-    segmentation_model = "log-v5"
+    segmentation_model = "tdTom-bright-log-v5"
     add_label_spacer = False
-    perform_tracking(root, experiment_date, well_num, tracking_config, scale_vec=scale_vec,
-                     seg_model=segmentation_model, start_i=0, stop_i=101, overwrite_flag=overwrite_flag,
-                     use_centroids=use_centroids, add_label_spacers=add_label_spacer)
-# print("Saving downsampled image data...")
-# np.save(project_path + "image_data_ds.npy", data_tzyx)
+    perform_tracking(root, experiment_date, well_num, tracking_config,
+                     seg_model=segmentation_model, start_i=0, stop_i=None, overwrite_registration=None)
