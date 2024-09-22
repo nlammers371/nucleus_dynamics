@@ -5,7 +5,7 @@ from skimage.registration import phase_cross_correlation
 from tqdm import tqdm
 import os
 import glob2 as glob
-from src.utilities.functions import path_leaf
+from utilities.functions import path_leaf
 
 def register_timelapse(video: np.ndarray, mask_thresh=None) -> np.ndarray:
 

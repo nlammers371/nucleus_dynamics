@@ -16,9 +16,9 @@ from cellpose import models
 from cellpose.core import use_gpu
 import pandas as pd
 from skimage.transform import resize
-from src.utilities.functions import path_leaf
+from utilities.functions import path_leaf
 import zarr
-from src.utilities.image_utils import calculate_LoG
+from utilities.image_utils import calculate_LoG
 from functools import partial
 from tqdm.contrib.concurrent import process_map
 
