@@ -81,7 +81,7 @@ def export_nd2_to_zarr(root,experiment_date, overwrite_flag, metadata_only=False
                 write_indices = np.arange(n_time_points)
             else:
                 write_indices = []
-                for t in tqdm(range(n_time_points), "Checking which frames to segment..."):
+                for t in tqdm(range(n_time_points), "Checking which frames to run02_segment..."):
                     if multichannel_flag:
                         nz_flag_to = np.any(well_zarr[0, t] != 0)
                     else:

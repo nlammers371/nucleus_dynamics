@@ -5,7 +5,7 @@ from skimage.registration import phase_cross_correlation
 from tqdm import tqdm
 import os
 import glob2 as glob
-from utilities.functions import path_leaf
+from src.utilities.functions import path_leaf
 
 def register_timelapse(video: np.ndarray, mask_thresh=None) -> np.ndarray:
 
@@ -37,9 +37,43 @@ def register_timelapse(video: np.ndarray, mask_thresh=None) -> np.ndarray:
         # if out_array is not None:
         video[t+1] = ndi.shift(video[t+1], (shift), order=1)
 
-    return video, shift_array
+    return shift_array
 
-def registration_wrapper(root, experiment_date, model_name,register_masks=True,  scale_vec=None, overwrite=False):
+
+def registration_wrapper(root, experiment_date):
+
+    metadata_dir = os.path.join(root, "metadata", "")
+    # path to zarr files
+    data_directory = os.path.join(root, "built_data", "zarr_image_files", experiment_date, '')
+    reg_data_directory = os.path.join(root, "built_data", "zarr_image_files_registered", experiment_date, '')
+    if not os.path.isdir(reg_data_directory):
+        os.makedirs(reg_data_directory)
+
+    # get list of images
+    image_list = sorted(glob.glob(data_directory + "*.zarr"))
+
+    for im_index in range(len(image_list)):
+
+        # prob_zarr = zarr.open(prob_name, mode="r")
+        zarr_path = image_list[im_index]
+        im_name = path_leaf(zarr_path)
+        print("processing " + im_name)
+        # read the image data
+        data_zarr = zarr.open(zarr_path, mode="a")
+        dstore = zarr.DirectoryStore(os.path.join(reg_data_directory, im_name))
+
+        data_zarr_r = zarr.open(store=dstore, mode="w", shape=data_zarr.shape,
+                                dtype=data_zarr.dtype, chunks=(1,) + data_zarr.shape[1:])
+
+        # register dataset
+        data_zarr_r[:], shift_array = register_timelapse(data_zarr)
+        # data_zarr_r = registered_data
+
+        # save shift array
+        np.save(os.path.join(metadata_dir, "registration", experiment_date + "_shift_array.npy"), shift_array)
+
+                    
+def registration_wrapper_orig(root, experiment_date, model_name,register_masks=True,  scale_vec=None, overwrite=False):
 
     if scale_vec is None:
         scale_vec = np.asarray([2.0, 0.55, 0.55])
@@ -57,17 +91,17 @@ def registration_wrapper(root, experiment_date, model_name,register_masks=True, 
     image_list = sorted(glob.glob(data_directory + "*.zarr"))
     register_list = [i for i in range(len(image_list)) if i not in [2, 12]]
 
-    for well_index in register_list:
+    for im_index in register_list:
 
         # prob_zarr = zarr.open(prob_name, mode="r")
-        zarr_path = image_list[well_index]
+        zarr_path = image_list[im_index]
         im_name = path_leaf(zarr_path)
         print("processing " + im_name)
         # read the image data
         data_zarr = zarr.open(zarr_path, mode="a")
 
         # generate zarr files
-        file_prefix = experiment_date + f"_well{well_index:04}"
+        file_prefix = experiment_date + f"_well{im_index:04}"
 
         # frame_vec = np.arange(0, data_zarr.shape[0])
         saved_frames = sorted(glob.glob(os.path.join(zarr_path, "*")))
