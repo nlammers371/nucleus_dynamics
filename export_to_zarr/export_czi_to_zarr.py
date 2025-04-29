@@ -10,10 +10,23 @@ from src.utilities.functions import path_leaf
 from tqdm.contrib.concurrent import process_map
 from functools import partial
 import zarr
+import re
 from src.utilities.register_image_stacks import register_timelapse
 import dask
 # def create_dummy_data(shape):
 #     return da.random.random(shape, chunks=(100, 100, 100))
+
+def get_prefix_list(raw_data_root):
+
+    # get list of all czi files in folder matching expected pattern
+    image_list = sorted(glob.glob(os.path.join(raw_data_root, f"*.czi")))
+
+    # replace trailing frame indicator and get unique prefixers
+    stripped_names = [re.sub(r"\(.*\).czi", "", os.path.basename(p)) for p in image_list]
+    prefix_list = np.unique(stripped_names).tolist()
+    prefix_list = [p for p in prefix_list if p != ""]
+
+    return prefix_list
 
 def initialize_zarr_store(zarr_path, image_list, resampling_scale, channel_to_use=None, overwrite_flag=False, last_i=None):
 
