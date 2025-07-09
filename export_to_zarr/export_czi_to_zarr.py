@@ -89,11 +89,11 @@ def write_zarr(t, zarr_file, image_list, overwrite_flag, file_prefix, tres, resa
         frame_shape = shape[1:]
         multichannel_flag = len(shape) > 4
         if not multichannel_flag:
-            image_data_rs = np.round(resize(image_data, frame_shape, preserve_range=True, order=1)).astype(np.uint16)
+            image_data_rs = np.round(resize(image_data, frame_shape, preserve_range=True, order=1, anti_aliasing=True)).astype(np.uint16)
         else:
             image_data_rs = np.empty(frame_shape, dtype=np.uint16)
             for c in range(frame_shape[0]):
-                image_data_rs[c] = np.round(resize(image_data[c], frame_shape[1:], preserve_range=True, order=1)).astype(
+                image_data_rs[c] = np.round(resize(image_data[c], frame_shape[1:], preserve_range=True, order=1, anti_aliasing=True)).astype(
                     np.uint16)
 
         # Export the Dask array to the OME-Zarr file
@@ -123,7 +123,7 @@ def write_zarr(t, zarr_file, image_list, overwrite_flag, file_prefix, tres, resa
 
 
 def export_czi_to_zarr(raw_data_root, file_prefix, project_name, save_root, tres, par_flag=True, last_i=None, overwrite_flag=False,
-                       resampling_scale=None, channel_names=None, channel_to_use=None, n_workers=16):
+                       resampling_scale=None, channel_names=None, channel_to_use=None, n_workers=8):
 
     if resampling_scale is None:
         resampling_scale = np.asarray([1.5, 1.5, 1.5])
