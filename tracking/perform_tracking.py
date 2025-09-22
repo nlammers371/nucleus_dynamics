@@ -311,13 +311,13 @@ def perform_tracking(root, project_name, tracking_config, seg_model, well_num=No
         mask_zarr_path = os.path.join(root, "built_data", "mask_stacks", seg_model, subfolder,
                                       file_prefix + "_marker_masks.zarr")
     else:
-        mask_zarr_path = os.path.join(root, "built_data", "mask_stacks", seg_model, project_name,
+        mask_zarr_path = os.path.join(root, "built_data", "mask_stacks", seg_model, subfolder,
                                       file_prefix + "_mask_aff.zarr")
 
     # get path to metadata
     metadata_path = os.path.join(root, "metadata", "tracking")
 
-    mask_tzyx = zarr.open(mask_zarr_path, mode='r')
+    mask_tzyx = zarr.open(mask_zarr_path, mode='a')
     mask_tzyx_da = da.from_zarr(mask_tzyx)
 
     if stop_i is None:
@@ -332,6 +332,13 @@ def perform_tracking(root, project_name, tracking_config, seg_model, well_num=No
     project_sub_path = os.path.join(project_path, f"track_{start_i:04}" + f"_{stop_i:04}" + suffix, "")
     os.makedirs(project_sub_path, exist_ok=True)
     full_shape = mask_tzyx.shape
+
+    if (len(list(mask_tzyx.attrs.keys())) == 0) and use_fused:
+        ref_path = os.path.join(root, "built_data", "mask_stacks", seg_model,
+                                      file_prefix + "_side1_mask_aff.zarr")
+        mask_ref = zarr.open(ref_path, mode='r')
+        for key in mask_ref.attrs.keys():
+            mask_tzyx.attrs[key] = mask_ref.attrs[key]
 
     if "voxel_size_um" not in mask_tzyx.attrs.keys():
         ad = mask_tzyx.attrs
